@@ -398,22 +398,25 @@ function authError(e){
   const map={"auth/invalid-credential":"Benutzername oder Passwort falsch.","auth/wrong-password":"Benutzername oder Passwort falsch.","auth/user-not-found":"Benutzername oder Passwort falsch.","auth/invalid-login-credentials":"Benutzername oder Passwort falsch.","auth/email-already-in-use":"Dieser Benutzername ist schon vergeben.","auth/weak-password":"Passwort zu kurz (mind. 6 Zeichen).","auth/too-many-requests":"Zu viele Versuche – kurz warten.","auth/network-request-failed":"Keine Internetverbindung.","auth/operation-not-allowed":"Diese Anmeldeart ist in Firebase noch nicht aktiviert."};
   return map[c]||("Fehler: "+(e&&e.message||c));
 }
+function withTimeout(p,ms){return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej({code:"timeout"}),ms))]);}
 $("authBtn").onclick=async()=>{
   const u=$("authUser").value.trim(), p=$("authPass").value;
-  if(!/^[A-Za-z0-9_]{3,16}$/.test(u)){$("authErr").textContent="Benutzername: 3–16 Zeichen, nur Buchstaben, Zahlen und _.";return;}
+  if(!FB_ON||!auth){$("authErr").textContent="Konten konnten nicht geladen werden – bitte Seite mit Strg+F5 neu laden oder Werbeblocker/Brave-Shields für diese Seite ausschalten.";return;}
+  if(!/^[A-Za-z0-9_]{3,16}$/.test(u)){$("authErr").textContent="Benutzername: 3–16 Zeichen, nur Buchstaben, Zahlen und _ (keine Leerzeichen, Punkte oder Umlaute).";return;}
   if(p.length<6){$("authErr").textContent="Passwort: mindestens 6 Zeichen.";return;}
-  $("authBtn").disabled=true;$("authErr").textContent="";
+  const label=$("authBtn").textContent;
+  $("authBtn").disabled=true;$("authBtn").textContent="Bitte warten …";$("authErr").textContent="";
   const email=u.toLowerCase()+EMAIL_DOMAIN;
   try{
     if(regMode){
-      const cred=await auth.createUserWithEmailAndPassword(email,p);
-      await db.collection("users").doc(cred.user.uid).set({name:u,rating:1200,wins:0,losses:0,draws:0,created:Date.now()});
+      const cred=await withTimeout(auth.createUserWithEmailAndPassword(email,p),15000);
+      await withTimeout(db.collection("users").doc(cred.user.uid).set({name:u,rating:1200,wins:0,losses:0,draws:0,created:Date.now()}),15000);
       await onSignedIn(cred.user);
     } else {
-      await auth.signInWithEmailAndPassword(email,p);
+      await withTimeout(auth.signInWithEmailAndPassword(email,p),15000);
     }
-  }catch(e){$("authErr").textContent=authError(e);}
-  $("authBtn").disabled=false;
+  }catch(e){$("authErr").textContent=e&&e.code==="timeout"?"Keine Antwort vom Server – wahrscheinlich blockiert ein Werbeblocker oder Brave-Shields die Anmeldung. Bitte für diese Seite ausschalten und neu laden.":authError(e);}
+  $("authBtn").disabled=false;$("authBtn").textContent=label;
 };
 $("authPass").addEventListener("keydown",e=>{if(e.key==="Enter")$("authBtn").click();});
 $("guestBtn").onclick=async()=>{
@@ -452,6 +455,7 @@ const PEER_OPTS={debug:0,config:{iceServers:[
   {urls:["turn:eu-0.turn.peerjs.com:3478","turn:us-0.turn.peerjs.com:3478"],username:"peerjs",credential:"peerjsp"}
 ]}};
 function send(o){
+  o=JSON.parse(JSON.stringify(o));
   if(FB_ON&&msgsRef){
     msgsRef.add({from:CLIENT,to:oppClient||null,seq:Date.now()+"_"+String(++seqCtr).padStart(6,"0"),data:o}).catch(e=>console.error(e));
   } else { try{conn&&conn.open&&conn.send(o);}catch(e){} }
